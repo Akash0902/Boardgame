@@ -2,8 +2,7 @@ pipeline {
   agent any
 
   tools {
-    // Configure these tool names in Jenkins Global Tool Configuration
-    jdk 'jdk17'          // change if your Jenkins uses jdk11/jdk8
+    jdk 'jdk17'
     maven 'maven3'
   }
 
@@ -13,11 +12,11 @@ pipeline {
     BRANCH          = 'main'
 
     APP_NAME        = 'boardgame'
-    DOCKER_IMAGE    = 'YOUR_DOCKERHUB_OR_ECR_REPO/boardgame'   // e.g. dockerhubuser/boardgame OR <acct>.dkr.ecr.<region>.amazonaws.com/boardgame
+    DOCKER_IMAGE    = 'YOUR_DOCKERHUB_OR_ECR_REPO/boardgame'   // change this
     DOCKER_TAG      = "${BUILD_NUMBER}"
 
-    // SonarQube (optional)
-    SONARQUBE_ENV   = 'sonar-server'  // Jenkins "Configure System" -> SonarQube servers name
+    // SonarQube
+    SONARQUBE_ENV      = 'sonar-server'   // Jenkins -> Configure System -> SonarQube servers name
     SONAR_PROJECT_KEY  = 'Boardgame'
     SONAR_PROJECT_NAME = 'Boardgame'
 
@@ -25,11 +24,12 @@ pipeline {
     K8S_NAMESPACE   = 'webapps'
     K8S_MANIFEST    = 'deployment-service.yaml'
 
-    // Credentials IDs (create in Jenkins Credentials)
-    DOCKER_CRED_ID  = 'docker-cred'   // DockerHub creds OR ECR creds if using docker login
-    // If using ECR login via AWS CLI, use AWS creds or instance role instead of docker creds
-    // AWS_CRED_ID  = 'aws-cred'
-    KUBECONFIG_CRED = 'k8s-cred'      // Jenkins Kubernetes credentials (kubeconfig)
+    // Credentials IDs
+    DOCKER_CRED_ID  = 'docker-cred'
+    KUBECONFIG_CRED = 'k8s-cred'
+
+    // Email
+    EMAIL_TO        = 'akashadak0012@gmail.com'
   }
 
   stages {
@@ -53,9 +53,10 @@ pipeline {
       }
     }
 
-    stage('SonarQube Analysis (optional)') {
+    stage('SonarQube Analysis') {
       when { expression { return env.SONARQUBE_ENV?.trim() } }
       steps {
+        // withSonarQubeEnv is required so Jenkins can track the analysis task for waitForQualityGate [3](https://github.com/MKdevops-ai/BoardGame/blob/main/deployment-service.yaml)[4](https://github.com/Melystial/Brookhaven-script/blob/main/brookhaven)
         withSonarQubeEnv("${SONARQUBE_ENV}") {
           sh """
             mvn -B sonar:sonar \
@@ -67,12 +68,37 @@ pipeline {
       }
     }
 
-    stage('Quality Gate (optional)') {
+    stage('Quality Gate') {
       when { expression { return env.SONARQUBE_ENV?.trim() } }
       steps {
-        // Requires "Quality Gates" + SonarQube plugin configured
-        timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: true
+        // waitForQualityGate waits for SonarQube result (requires webhook configured) [3](https://github.com/MKdevops-ai/BoardGame/blob/main/deployment-service.yaml)[4](https://github.com/Melystial/Brookhaven-script/blob/main/brookhaven)
+        timeout(time: 10, unit: 'MINUTES') {
+          script {
+            def qg = waitForQualityGate()  // returns status like OK / ERROR
+            if (qg.status != 'OK') {
+
+              // Email immediately when Quality Gate fails [1](https://www.coursera.org/learn/implementing-cicd-with-jenkins-creating-pipeline-as-code)
+              emailext(
+                to: "${EMAIL_TO}",
+                subject: "❌ QUALITY GATE FAILED | ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                mimeType: 'text/html',
+                attachLog: true,
+                body: """
+                  <h3 style="color:#d93025;">Quality Gate Failed</h3>
+                  <p><b>Status:</b> ${qg.status}</p>
+                  <p><b>Job:</b> ${env.JOB_NAME}</p>
+                  <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+                  <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                  <p><b>Action:</b> Pipeline stopped before Docker/JFrog/K8s steps.</p>
+                  <hr/>
+                  <p>Tip: Fix Sonar issues and re-run. (Console log attached)</p>
+                """
+              )
+
+              // Stop pipeline here (as required)
+              error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
+            }
+          }
         }
       }
     }
@@ -95,14 +121,16 @@ pipeline {
 
     stage('Deploy to Kubernetes') {
       steps {
-        // Replace image tag dynamically in manifest before applying
+        // Safer: create a temp manifest so we don't permanently modify your repo file in workspace
         sh """
-          sed -i 's|IMAGE_PLACEHOLDER|${DOCKER_IMAGE}:${DOCKER_TAG}|g' ${K8S_MANIFEST}
-          cat ${K8S_MANIFEST}
+          cp ${K8S_MANIFEST} ${K8S_MANIFEST}.rendered
+          sed -i 's|IMAGE_PLACEHOLDER|${DOCKER_IMAGE}:${DOCKER_TAG}|g' ${K8S_MANIFEST}.rendered
+          echo "----- Rendered Manifest -----"
+          cat ${K8S_MANIFEST}.rendered
         """
 
         withKubeConfig(credentialsId: "${KUBECONFIG_CRED}", namespace: "${K8S_NAMESPACE}") {
-          sh "kubectl apply -f ${K8S_MANIFEST}"
+          sh "kubectl apply -f ${K8S_MANIFEST}.rendered"
           sh "kubectl get pods -n ${K8S_NAMESPACE}"
           sh "kubectl get svc  -n ${K8S_NAMESPACE}"
         }
@@ -111,8 +139,45 @@ pipeline {
   }
 
   post {
+    success {
+      // Success mail [1](https://www.coursera.org/learn/implementing-cicd-with-jenkins-creating-pipeline-as-code)
+      emailext(
+        to: "${EMAIL_TO}",
+        subject: "✅ PIPELINE SUCCESS | ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+        mimeType: 'text/html',
+        attachLog: true,
+        body: """
+          <h3 style="color:#188038;">Pipeline Successful</h3>
+          <p><b>Job:</b> ${env.JOB_NAME}</p>
+          <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+          <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+          <p><b>Result:</b> ✅ Build → Sonar → Docker → Push → Deploy completed successfully.</p>
+          <hr/>
+          <p>Console log attached for reference.</p>
+        """
+      )
+    }
+
+    failure {
+      // General failure mail (covers failures outside Quality Gate too) [1](https://www.coursera.org/learn/implementing-cicd-with-jenkins-creating-pipeline-as-code)
+      emailext(
+        to: "${EMAIL_TO}",
+        subject: "❌ PIPELINE FAILED | ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+        mimeType: 'text/html',
+        attachLog: true,
+        body: """
+          <h3 style="color:#d93025;">Pipeline Failed</h3>
+          <p><b>Job:</b> ${env.JOB_NAME}</p>
+          <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+          <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+          <p><b>Result:</b> ❌ Check the console log (attached) to identify the failing stage.</p>
+        """
+      )
+    }
+
     always {
       sh 'docker system prune -af || true'
+      sh 'rm -f deployment-service.yaml.rendered || true'
     }
   }
 }
