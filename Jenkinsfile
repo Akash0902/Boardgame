@@ -1,6 +1,12 @@
 pipeline {
   agent any
 
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
   tools {
     jdk 'jdk17'
     maven 'Maven3'
@@ -41,7 +47,7 @@ pipeline {
     PACKAGING   = 'jar'
 
     // ----------------------
-    // Docker / ECR Public (STORE IMAGE IN VERSION)
+    // Docker / ECR Public
     // ----------------------
     IMAGE_NAME = 'boardgame-app'
     IMAGE_TAG  = "${BUILD_NUMBER}"
@@ -51,9 +57,16 @@ pipeline {
     IMAGE_REPO            = 'public.ecr.aws/k6c3y2y2/boardgame'
 
     // ----------------------
-    // Kubernetes manifest
+    // Kubernetes / EKS
     // ----------------------
     K8S_MANIFEST = 'deployment.yml'
+
+    // IMPORTANT: set these to your cluster
+    EKS_CLUSTER_NAME = 'boardgame'
+    EKS_REGION       = 'ap-south-1'
+
+    // If your deployment metadata.name is different, change it
+    K8S_DEPLOYMENT_NAME = 'boardgame-deployment'
   }
 
   stages {
@@ -62,6 +75,7 @@ pipeline {
       steps {
         git branch: "${BRANCH}", url: "${REPO_URL}"
         sh 'ls -al'
+        sh 'test -f ${K8S_MANIFEST}'
       }
     }
 
@@ -126,6 +140,7 @@ pipeline {
           passwordVariable: 'JF_PASS'
         )]) {
           script {
+            // IMPORTANT: real XML (not &lt; &gt;)
             writeFile file: 'settings.xml', text: """
 <settings>
   <servers>
@@ -153,6 +168,7 @@ pipeline {
         )]) {
           sh '''
             set -e
+
             BASE="${JFROG_BASE_URL}/${JFROG_REPO_KEY}/${GROUP_PATH}/${ARTIFACT_ID}/${VERSION}"
             echo "JFrog base: $BASE"
 
@@ -160,11 +176,20 @@ pipeline {
               echo "Snapshot detected -> downloading maven-metadata.xml"
               curl -fL -u "$JF_USER:$JF_PASS" "$BASE/maven-metadata.xml" -o maven-metadata.xml
 
-              SNAP_VALUE=$(grep -A5 "<snapshotVersion>" maven-metadata.xml \
-                | grep -A1 "<extension>${PACKAGING}</extension>" \
-                | grep "<value>" \
-                | head -n1 \
-                | sed -E 's/.*<value>([^<]+)<\\/value>.*/\\1/')
+              # Try to extract first <value> that belongs to our extension
+              SNAP_VALUE=$(awk '
+                BEGIN {ext="'"${PACKAGING}"'"; inSV=0; inExt=0;}
+                /<snapshotVersion>/ {inSV=1}
+                inSV && /<extension>/ {
+                  gsub(/.*<extension>|<\\/extension>.*/,"");
+                  if ($0==ext) inExt=1; else inExt=0
+                }
+                inSV && inExt && /<value>/ {
+                  gsub(/.*<value>|<\\/value>.*/,"");
+                  print; exit
+                }
+                /<\\/snapshotVersion>/ {inSV=0; inExt=0}
+              ' maven-metadata.xml)
 
               [ -n "$SNAP_VALUE" ] || (echo "Snapshot parse failed" && exit 1)
 
@@ -200,6 +225,8 @@ pipeline {
       steps {
         sh '''
           set -e
+
+          # ECR Public login (AWS recommends us-east-1 for public registry auth)
           aws ecr-public get-login-password --region ${AWS_REGION_ECR_PUBLIC} | \
             docker login --username AWS --password-stdin ${ECR_PUBLIC_REGISTRY}
 
@@ -212,11 +239,20 @@ pipeline {
       }
     }
 
-    stage('Deploy to Kubernetes') {
+    stage('Deploy to Kubernetes (EKS)') {
       steps {
         sh '''
           set -e
           test -f ${K8S_MANIFEST}
+
+          echo "AWS identity:"
+          aws sts get-caller-identity || true
+
+          echo "Configuring kubectl for EKS (refresh every run)..."
+          aws eks update-kubeconfig --region ${EKS_REGION} --name ${EKS_CLUSTER_NAME}
+
+          kubectl config current-context
+          kubectl get nodes
 
           # Render manifest with the exact pushed image tag
           cp ${K8S_MANIFEST} ${K8S_MANIFEST}.rendered
@@ -225,11 +261,12 @@ pipeline {
           echo "----- Rendered Manifest -----"
           cat ${K8S_MANIFEST}.rendered
 
-          # Apply and wait for rollout (pattern you used earlier)
           kubectl apply -f ${K8S_MANIFEST}.rendered
-          kubectl rollout status deployment/boardgame-deployment --timeout=2m
 
-          kubectl get pods
+          # rollout status (same deployment pattern you’ve used before)
+          kubectl rollout status deployment/${K8S_DEPLOYMENT_NAME} --timeout=2m
+
+          kubectl get pods -o wide
           kubectl get svc
         '''
       }
@@ -237,6 +274,37 @@ pipeline {
   }
 
   post {
+    success {
+      emailext(
+        to: "${EMAIL_TO}",
+        subject: "✅ SUCCESS | ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+        mimeType: 'text/html',
+        body: """
+          <h3 style="color:#188038;">Pipeline Succeeded</h3>
+          <p><b>Job:</b> ${env.JOB_NAME}</p>
+          <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+          <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+          <p><b>Image pushed:</b> ${IMAGE_REPO}:${IMAGE_TAG} and ${IMAGE_REPO}:latest</p>
+        """
+      )
+    }
+
+    failure {
+      emailext(
+        to: "${EMAIL_TO}",
+        subject: "❌ FAILED | ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+        mimeType: 'text/html',
+        attachLog: true,
+        body: """
+          <h3 style="color:#d93025;">Pipeline Failed</h3>
+          <p><b>Job:</b> ${env.JOB_NAME}</p>
+          <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+          <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+          <p>Please check attached console log for details.</p>
+        """
+      )
+    }
+
     always {
       sh 'rm -f settings.xml app.jar maven-metadata.xml deployment.yml.rendered || true'
     }
