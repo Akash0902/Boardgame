@@ -1,21 +1,11 @@
-# ---- Build stage ----
-FROM maven:3.9.9-eclipse-temurin-17 AS build
-WORKDIR /app
-
-# Cache deps first
-COPY pom.xml .
-RUN mvn -B -q -DskipTests dependency:go-offline
-
-# Build
-COPY src ./src
-RUN mvn -B -DskipTests clean package
-
-# ---- Runtime stage ----
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
-# Copy jar
-COPY --from=build /app/target/*.jar app.jar
+# Copy the JAR downloaded from JFrog (pipeline saves it as app.jar)
+COPY app.jar /app/app.jar
 
-EXPOSE 8080
-ENTRYPOINT ["java","-jar","app.jar"]
+# App listens on 8000 inside container
+EXPOSE 8000
+
+# Force Spring Boot to listen on 8000 (avoid host 8080 conflicts)
+ENTRYPOINT ["java","-jar","/app/app.jar","--server.port=8000"]
