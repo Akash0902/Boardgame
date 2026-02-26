@@ -130,17 +130,17 @@
        JFrog recommends using distributionManagement pointing to:
        https://<JFROG_DOMAIN>/artifactory/<MAVEN_REPO_KEY> -->
   <distributionManagement>
-    <repository>
-      <id>boardgame</id>
-      <name>boardgame-releases</name>
-      <url>https://&lt;YOUR_JFROG_DOMAIN&gt;/artifactory/boardgame</url>
-    </repository>
+  <repository>
+    <id>boardgame</id>
+    <name>boardgame-releases</name>
+    <url>http://13.200.239.127:8081/artifactory/boardgame</url>
+  </repository>
 
-    <snapshotRepository>
-      <id>boardgame</id>
-      <name>boardgame-snapshots</name>
-      <url>https://&lt;YOUR_JFROG_DOMAIN&gt;/artifactory/boardgame</url>
-    </snapshotRepository>
-  </distributionManagement>
+  <snapshotRepository>
+    <id>boardgame</id>
+    <name>boardgame-snapshots</name>
+    <url>http://13.200.239.127:8081/artifactory/boardgame</url>
+  </snapshotRepository>
+</distributionManagement>
 
 </project>
