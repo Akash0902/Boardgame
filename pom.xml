@@ -133,7 +133,7 @@
   <repository>
     <id>boardgame</id>
     <name>boardgame-releases</name>
-    <url>http://13.200.239.127:8081/artifactory/boardgame</url>
+    <url>http://43.205.216.159:8081/artifactory/boardgame</url>
   </repository>
 
   <snapshotRepository>
