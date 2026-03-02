@@ -35,7 +35,7 @@
 
             <div sec:authorize="!hasRole('ROLE_USER')">
                 <p class="lead">Hello Gandu <a href="#" th:href="@{/login}">Here</a></p>
-                <p class="lead">To join to the service, <a href="#" th:href="@{/newUser}">Click</a> here</p>
+                <p class="lead">Fuck U Lavdu<a href="#" th:href="@{/newUser}">Click</a> here</p>
             </div>
             <div sec:authorize="hasRole('ROLE_USER') || hasRole('ROLE_MANAGER')">
                 <p class="lead">Click <a href="#" th:href="@{/secured/addBoardGame}">Here</a> to add a boardgame!</p>
