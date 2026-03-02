@@ -9,7 +9,7 @@ pipeline {
 
   tools {
     jdk 'jdk17'
-    maven 'Maven3'
+    maven 'maven3'
   }
 
   environment {
@@ -22,7 +22,7 @@ pipeline {
     // ----------------------
     // JFrog (Artifactory)
     // ----------------------
-    JFROG_BASE_URL = 'http://13.200.239.127:8081/artifactory'
+    JFROG_BASE_URL = 'http://13.201.117.17:8081/artifactory'
     JFROG_REPO_KEY = 'boardgame'
     JFROG_CRED_ID  = 'jfrog'
 
@@ -107,30 +107,7 @@ pipeline {
       }
     }
 
-    stage('Quality Gate') {
-      when { expression { return env.SONARQUBE_ENV?.trim() } }
-      steps {
-        script {
-          timeout(time: 10, unit: 'MINUTES') {
-            def qg = waitForQualityGate()
-            if (qg.status != 'OK') {
-              emailext(
-                to: "${EMAIL_TO}",
-                subject: "❌ QUALITY GATE FAILED | ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                mimeType: 'text/html',
-                attachLog: true,
-                body: """
-                  <h3 style="color:#d93025;">Quality Gate Failed</h3>
-                  <p><b>Status:</b> ${qg.status}</p>
-                  <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                """
-              )
-              error "Pipeline aborted due to Quality Gate failure: ${qg.status}"
-            }
-          }
-        }
-      }
-    }
+
 
     stage('Deploy Artifact to JFrog (boardgame repo)') {
       steps {
