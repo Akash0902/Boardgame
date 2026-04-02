@@ -35,8 +35,8 @@
             </div>
 
             <div sec:authorize="!hasRole('ROLE_USER')">
-                <p class="lead">Bipin changla nahi ahe<a href="#" th:href="@{/login}">Here</a></p>
-                <p class="lead">Chirag Draupadi<a href="#" th:href="@{/newUser}">Click</a> here</p>
+                <p class="lead">Argo CD Pipeline<a href="#" th:href="@{/login}">Here</a></p>
+                <p class="lead">Jenkins -- Argo CD <a href="#" th:href="@{/newUser}">Click</a> here</p>
             </div>
             <div sec:authorize="hasRole('ROLE_USER') || hasRole('ROLE_MANAGER')">
                 <p class="lead">Click <a href="#" th:href="@{/secured/addBoardGame}">Here</a> to add a boardgame!</p>
