@@ -18,7 +18,7 @@ spec:
         - name: nexus-creds
       containers:
         - name: boardgame
-          image: IMAGE_PLACEHOLDER
+          image: 13.232.157.203:8000/boardgame:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8082
@@ -49,3 +49,4 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 8082
+``
